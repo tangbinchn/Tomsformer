@@ -12,7 +12,7 @@ from torchvision.transforms import Compose, Normalize
 from transformers import BertTokenizer
 
 from networks.tomsformer import VideoFeatureProjector, AudioFeatureProjector
-from utils.process_data_bigfive import process_asr_file
+from utils.process_data_bigfive import process_asr_file, process_data_bigfive
 # 忽视警告
 import warnings
 
@@ -32,7 +32,7 @@ class BigfiveDataset(Dataset):
             Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
         self.video_projector = VideoFeatureProjector(input_dim=1000)
-        self.audio_projector = AudioFeatureProjector(input_dim=26*1121)
+        self.audio_projector = AudioFeatureProjector(input_dim=26 * 1121)
         self.video_model = resnet50(pretrained=True)
         self.video_model.eval()
         # 过滤 asr_list，确保只选择有标签的数据
@@ -75,24 +75,27 @@ class BigfiveDataset(Dataset):
         # print(f'video_tensor.shape: {video_tensor.shape}') # video_tensor.shape: torch.Size([10, 256, 256, 3])
 
         video_tensor = video_tensor.permute(0, 3, 1, 2)  # (10, 3, 256, 256)
+        # print(f'video_tensor.shape: {video_tensor.shape}') # video_tensor.shape: torch.Size([10, 3, 256, 256])
 
-        with torch.no_grad():
-            video_features = self.video_model(video_tensor)
-            # print(f'video_features.shape: {video_features.shape}')  # video_features.shape: torch.Size([10, 1000])
-            # video_features = self.video_projector(video_features)  # shape: torch.Size([512])
-            print(f'one sample video_features.shape: {video_features.shape}')  # video_features.shape: torch.Size([512])
+        # with torch.no_grad():
+        #     video_features = self.video_model(video_tensor)
+        #     # print(f'video_features.shape: {video_features.shape}')  # video_features.shape: torch.Size([10, 1000])
+        #     # video_features = self.video_projector(video_features)  # shape: torch.Size([512])
+        #     print(f'one sample video_features.shape: {video_features.shape}')  # video_features.shape: torch.Size([512])
 
-        # Load audio segment and extract features
-        audio_features = self._load_audio_features(filename, start_sec, end_sec, self.num_mfcc)
-        # print(f'audio_features.shape: {audio_features.shape}')  # audio_features.shape: torch.Size([26, 1121])
-        # audio_features = self.audio_projector(audio_features)  # shape: torch.Size([512])
-        print(f'one sample audio_features.shape: {audio_features.shape}')  # audio_features.shape: torch.Size([512])
+        # Load audio segment tensor
+        audio_tensor = self._load_audio_tensor(filename, start_sec, end_sec)  # (17936000,)
+        # print(f'one sample audio_tensor.shape: {audio_tensor.shape}')  # audio_tensor.shape: torch.Size([17936000])
         # exit()
 
         # Get label
         label = \
             self.label_df[(self.label_df['filename'] == filename) & (self.label_df['q_id'] == int(q_id))][
                 'label'].values[0]
+        label_tensor = torch.tensor(label, dtype=torch.long)
+        # print(f'label: {label}')  # label
+        # print(f'shape of label: {label.shape}')  # shape of label: torch.Size([])
+        # exit()
 
         # 使用tokenizer处理asr_txt
         txt_encoding = self.tokenizer.encode_plus(
@@ -105,16 +108,33 @@ class BigfiveDataset(Dataset):
             return_attention_mask=True,
             return_tensors='pt',
         )
+        '''
+        shape of txt_encoding['input_ids']: torch.Size([1, 4648])
+        shape of txt_encoding['attention_mask']: torch.Size([1, 4648])
+        '''
+
+        # print(f'one sample txt_encoding: {txt_encoding}')
+        # print(f'shape of input_ids: {txt_encoding["input_ids"].shape}')
+        # print(f'shape of attention_mask: {txt_encoding["attention_mask"].shape}')
+        # exit()
 
         # print(
         #     f'filename: {filename}, q_id: {q_id}, start_sec: {start_sec}, end_sec: {end_sec}, asr_txt: {asr_txt}, label: {label}')
         # exit()
 
-        # # 下面两步放在多模态模型中再提取
-        # input_ids = txt_encoding['input_ids'].squeeze()  # (max_txt_length,)
-        # attention_mask = txt_encoding['attention_mask'].squeeze()  # (max_txt_length,)
+        # 下面两步也可以放在多模态模型中再提取
+        txt_encoding['input_ids'] = txt_encoding['input_ids'].squeeze()  # (max_txt_length,)
+        txt_encoding['attention_mask'] = txt_encoding['attention_mask'].squeeze()  # (max_txt_length,)
+        # print(f'one sample txt_encoding: {txt_encoding}')
+        # print(f'shape of input_ids: {txt_encoding["input_ids"].shape}')
+        # print(f'shape of attention_mask: {txt_encoding["attention_mask"].shape}')
+        # exit()
+        '''
+        shape of txt_encoding['input_ids']: torch.Size([4648])
+        shape of txt_encoding['attention_mask']: torch.Size([4648])
+        '''
 
-        return video_features, audio_features, asr_txt, txt_encoding, label
+        return video_tensor, audio_tensor, asr_txt, txt_encoding, label_tensor
 
     def _load_video_frames(self, filename, start_sec, end_sec, frames_size):
         video_path = os.path.join(self.video_folder, filename + '.mp4')
@@ -159,33 +179,61 @@ class BigfiveDataset(Dataset):
         # frames_tensor = torch.stack([torch.tensor(frame, dtype=torch.float32) for frame in frames])
         return frames
 
-    def _load_audio_features(self, filename, start_sec, end_sec, num_mfcc):
+    def _load_audio_tensor(self, filename, start_sec, end_sec):
         video_path = os.path.join(self.video_folder, filename + '.mp4')
         y, sr = librosa.load(video_path, sr=16000, offset=start_sec, duration=end_sec - start_sec)
+        audio_tensor = torch.tensor(y, dtype=torch.float32)
+        max_samples = self.max_duration * sr
+        padding_length = max_samples - audio_tensor.shape[0]
+        if padding_length > 0:
+            # Pad audio tensor
+            padding = torch.zeros(padding_length, dtype=torch.float32)
+            audio_tensor = torch.cat((audio_tensor, padding))
 
-        # Extract MFCC features
-        mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=num_mfcc)
-        delta_mfccs = librosa.feature.delta(mfccs)
-        features_mfcc = np.concatenate([mfccs, delta_mfccs], axis=0)
+        # # Extract MFCC features
+        # mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=num_mfcc)
+        # delta_mfccs = librosa.feature.delta(mfccs)
+        # features_mfcc = np.concatenate([mfccs, delta_mfccs], axis=0)
+        #
+        # # Convert to torch tensor
+        # features_tensor = torch.tensor(features_mfcc, dtype=torch.float32)
 
-        # Convert to torch tensor
-        features_tensor = torch.tensor(features_mfcc, dtype=torch.float32)
+        # # Pad or truncate audio features to ensure consistent length
+        # current_length = audio_tensor.shape[0]
 
-        # Pad or truncate audio features to ensure consistent length
-        current_length = features_tensor.shape[1]
+        # # If current length is less than target length, pad
+        # if current_length < self.max_duration:
+        #     # print('current_length:', current_length)
+        #     # # 查看current_length的数据类型
+        #     # print('type(current_length):', type(current_length))
+        #     # exit()
+        #     padding_length = self.max_duration - current_length
+        #     padding = torch.zeros((audio_tensor.shape[0], padding_length))
+        #     audio_tensor = torch.cat([audio_tensor, padding], dim=1)
+        #
+        # # If current length is more than target length, truncate
+        # elif current_length > self.max_duration:
+        #     audio_tensor = audio_tensor[:, :self.max_duration]
 
-        # If current length is less than target length, pad
-        if current_length < self.max_duration:
-            # print('current_length:', current_length)
-            # # 查看current_length的数据类型
-            # print('type(current_length):', type(current_length))
-            # exit()
-            padding_length = self.max_duration - current_length
-            padding = torch.zeros((features_tensor.shape[0], padding_length))
-            features_tensor = torch.cat([features_tensor, padding], dim=1)
+        return audio_tensor
 
-        # If current length is more than target length, truncate
-        elif current_length > self.max_duration:
-            features_tensor = features_tensor[:, :self.max_duration]
 
-        return features_tensor
+if __name__ == '__main__':
+    label_path = "/Users/tangbin/Documents/q_id_label20230804.xlsx"
+    asr_folder = "/Users/tangbin/Documents/txts-asr-v2"
+    video_folder = "/Volumes/Toms Shield/datasets/VRLab/BigFive/videos"
+    # Tokenization
+    tokenizer = BertTokenizer.from_pretrained("hfl/chinese-roberta-wwm-ext")
+    label_df, all_asr_data, max_duration, max_txt_length = process_data_bigfive(label_path, asr_folder, tokenizer)
+
+    # 使用示例：
+    dataset = BigfiveDataset(video_folder, label_df, all_asr_data, tokenizer, max_duration, max_txt_length,
+                             num_frames=10, num_mfcc=13, frames_size=256)
+    dataloader = DataLoader(dataset, batch_size=5, num_workers=5)
+
+    for video_tensor, audio_tensor, asr_txt, txt_encoding, label_tensor in dataloader:
+        print(f'video_tensor.shape: ', video_tensor.shape)  # video_tensor.shape:  torch.Size([batch_size, num_frames, 3, 256, 256])
+        print(f'audio_tensor.shape: ', audio_tensor.shape)  # audio_tensor.shape:  torch.Size([batch_size, 17936000])
+        print(f'input_id.shape: ', txt_encoding['input_ids'].shape)  # input_id.shape:  torch.Size([batch_size, 4648])
+        print(f'attention_mask.shape: ', txt_encoding['attention_mask'].shape)  # attention_mask.shape:  torch.Size([batch_size, 4648])
+        # break
