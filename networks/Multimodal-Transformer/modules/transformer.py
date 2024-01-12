@@ -201,5 +201,6 @@ def LayerNorm(embedding_dim):
 
 if __name__ == '__main__':
     encoder = TransformerEncoder(300, 4, 2)
-    x = torch.tensor(torch.rand(20, 2, 300))
+    # x = torch.tensor(torch.rand(20, 2, 300))
+    x = torch.rand(20, 2, 300).clone().detach()
     print(encoder(x).shape)

@@ -1,16 +1,28 @@
-# 这是一个示例 Python 脚本。
-
-# 按 ⌃R 执行或将其替换为您的代码。
-# 按 双击 ⇧ 在所有地方搜索类、文件、工具窗口、操作和设置。
-
-
-def print_hi(name):
-    # 在下面的代码行中使用断点来调试脚本。
-    print(f'Hi, {name}')  # 按 ⌘F8 切换断点。
+from data.data_module import get_dataloader
+from models.model_module import Net
+from train_predict.predict_module import load_model, predict
+from train_predict.train_module import train_model
+import torch
 
 
-# 按装订区域中的绿色按钮以运行脚本。
-if __name__ == '__main__':
-    print_hi('PyCharm')
+def main():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f'device: {device}')
+    exit()
 
-# 访问 https://www.jetbrains.com/help/pycharm/ 获取 PyCharm 帮助
+    # 训练部分
+    dataloader_train = get_dataloader(batch_size=32, shuffle=True)
+    model = Net().to(device)
+    trained_model = train_model(model, dataloader_train, epochs=10, device=device)
+    torch.save(trained_model.state_dict(), 'model.pth')
+
+    # 预测部分
+    dataloader_test = get_dataloader(batch_size=32, shuffle=False)
+    model = Net().to(device)
+    model = load_model(model, 'model.pth')
+    predictions = predict(model, dataloader_test, device=device)
+    print(predictions)  # 或者对预测结果进行其他处理
+
+
+if __name__ == "__main__":
+    main()

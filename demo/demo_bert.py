@@ -48,9 +48,6 @@ def load_data(data_folder, label_file):
     return dataset
 
 
-
-
-
 # 3. Training and evaluation functions
 def train_model(model, data_loader, optimizer, scheduler, device):
     model = model.train()
@@ -62,8 +59,8 @@ def train_model(model, data_loader, optimizer, scheduler, device):
 
         input_ids = txt_encoding["input_ids"].to(device)
         attention_mask = txt_encoding["attention_mask"].to(device)
-        print(f'input_ids.shape: {input_ids.shape}')
-        print(f'attention_mask.shape: {attention_mask.shape}')
+        # print(f'input_ids.shape: {input_ids.shape}')
+        # print(f'attention_mask.shape: {attention_mask.shape}')
         labels = label_tensor.to(device)
         outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
         loss = outputs.loss
@@ -80,10 +77,10 @@ def evaluate_model(model, data_loader, device):
     total_predictions = 0
     all_preds = []
     all_labels = []
-    for batch in data_loader:
-        input_ids = batch["input_ids"].to(device)
-        attention_mask = batch["attention_mask"].to(device)
-        labels = batch["labels"].to(device)
+    for video_tensor, audio_tensor, asr_txt, txt_encoding, label_tensor in data_loader:
+        input_ids = txt_encoding["input_ids"].to(device)
+        attention_mask = txt_encoding["attention_mask"].to(device)
+        labels = label_tensor.to(device)
         with torch.no_grad():
             outputs = model(input_ids=input_ids, attention_mask=attention_mask)
             logits = outputs.logits
@@ -111,10 +108,10 @@ def test_model(model, data_loader, device):
     all_labels = []
 
     with torch.no_grad():
-        for batch in data_loader:
-            input_ids = batch["input_ids"].to(device)
-            attention_mask = batch["attention_mask"].to(device)
-            labels = batch["labels"].to(device)
+        for video_tensor, audio_tensor, asr_txt, txt_encoding, label_tensor in data_loader:
+            input_ids = txt_encoding["input_ids"].to(device)
+            attention_mask = txt_encoding["attention_mask"].to(device)
+            labels = label_tensor.to(device)
 
             outputs = model(input_ids=input_ids, attention_mask=attention_mask)
             logits = outputs.logits
@@ -146,10 +143,10 @@ def test_model(model, data_loader, device):
     print(f"F1 Score: {f1}")
 
 
-def generate_random_combinations(num_iterations=10):
-    learning_rates = [2e-5, 3e-5, 5e-5, 1e-4, 2e-4, 3e-4, 5e-4]
+def generate_random_combinations(num_iterations=1):
+    learning_rates = [2e-5]
     batch_sizes = [8]
-    warmup_ratios = [0, 0.1, 0.2]
+    warmup_ratios = [0]
 
     random_combinations = []
     for _ in range(num_iterations):
@@ -159,6 +156,7 @@ def generate_random_combinations(num_iterations=10):
         random_combinations.append((lr, batch_size, warmup_ratio))
 
     return random_combinations
+
 
 # 4. Main function
 def main():
@@ -178,12 +176,16 @@ def main():
 
     # Calculate the lengths of splits
     total_size = dataset.__len__()
+    print(f'Total size: {total_size}')
     train_size = int(0.7 * total_size)
     valid_size = int(0.2 * total_size)
     test_size = total_size - train_size - valid_size
 
     # Split the dataset
     train_set, valid_set, test_set = random_split(dataset, [train_size, valid_size, test_size])
+    print(f'Train size: {train_size}')
+    print(f'Valid size: {valid_size}')
+    print(f'Test size: {test_size}')
 
     # # Create DataLoaders for each subset
     # # data_loader = DataLoader(data_set, batch_size=BATCH_SIZE, shuffle=True)
@@ -196,10 +198,11 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
         # If on Linux with multiple GPUs, use all of them
-        model = torch.nn.DataParallel(BertForSequenceClassification.from_pretrained("hfl/chinese-roberta-wwm-ext", num_labels=5))
+        model = torch.nn.DataParallel(
+            BertForSequenceClassification.from_pretrained("hfl/chinese-roberta-wwm-ext", num_labels=5))
     else:
         # If on Mac, use MPS
-        device = torch.device("mps" if platform.system()== "Darwin" else "cpu")
+        device = torch.device("mps" if platform.system() == "Darwin" else "cpu")
         model = BertForSequenceClassification.from_pretrained("hfl/chinese-roberta-wwm-ext", num_labels=5)
     model = model.to(device)
 
@@ -211,7 +214,7 @@ def main():
     best_model_path = "../models/bert_best_model.pth"
 
     # 获取不同超参数组合
-    random_combinations = generate_random_combinations(num_iterations=10)
+    random_combinations = generate_random_combinations(num_iterations=1)
     # print(random_combinations)
     # exit()
 
@@ -226,15 +229,39 @@ def main():
         test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=8)
 
         optimizer = AdamW(model.parameters(), lr=lr)
+        print(f'len(train_loader): {len(train_loader)}')
+        print(f'EPOCHS: {EPOCHS}')
         total_steps = len(train_loader) * EPOCHS
         scheduler = get_linear_schedule_with_warmup(
             optimizer, num_warmup_steps=warmup_ratio, num_training_steps=total_steps)
 
         for ep in range(1, EPOCHS + 1):
             print(f"Training for LR={lr}, Epoch={ep}, Batch Size={batch_size}, Warmup Ratio={warmup_ratio}")
-            train_model(model, train_loader, optimizer, scheduler, device)
+            # train_model(model, train_loader, optimizer, scheduler, device)
+            model = model.train()
+            for iter, (video_tensor, audio_tensor, asr_txt, txt_encoding, label_tensor) in enumerate(train_loader):
+                input_ids = txt_encoding["input_ids"].to(device)
+                attention_mask = txt_encoding["attention_mask"].to(device)
+                # print(f'input_ids.shape: {input_ids.shape}')
+                # print(f'attention_mask.shape: {attention_mask.shape}')
+                labels = label_tensor.to(device)
+                outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+                loss = outputs.loss
+                # print(f'loss: {loss}')
+                print(f'Training iter: {iter}/{total_steps}, epoch: {ep}, loss: {loss}')
+                loss.backward()
+                optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad()
 
             accuracy, precision, recall, f1, r = evaluate_model(model, valid_loader, device)
+
+            print(
+                f"Accuracy for LR={lr}, Epochs={ep}, Batch Size={batch_size}, Warmup Ratio={warmup_ratio}: {accuracy}")
+            print(f"Precision: {precision}")
+            print(f"Recall: {recall}")
+            print(f"F1 Score: {f1}")
+            print(f"Pearson Correlation Coefficient: {r}")
 
             # Assuming we want to maximize accuracy for early stopping
             if best_accuracy == 0 or accuracy > best_accuracy:
@@ -247,14 +274,10 @@ def main():
 
             # Stop training if counter reaches patience
             if no_improve_counter >= patience:
-                print(f"Early stopping triggered for LR={lr}, Epoch={ep}, Batch Size={batch_size}, Warmup Ratio={warmup_ratio}.")
+                print(
+                    f"Early stopping triggered for LR={lr}, Epoch={ep}, Batch Size={batch_size}, Warmup Ratio={warmup_ratio}.")
                 break
 
-            print(f"Accuracy for LR={lr}, Epochs={ep}, Batch Size={batch_size}, Warmup Ratio={warmup_ratio}: {accuracy}")
-            print(f"Precision: {precision}")
-            print(f"Recall: {recall}")
-            print(f"F1 Score: {f1}")
-            print(f"Pearson Correlation Coefficient: {r}")
             # # 把上述的print改成log，然后把log写入文件，然后用grep找到最好的结果
             # # 写入日志文件
             # with open('log/adjust_parameter_text_embedding_log.txt', 'a') as log:
@@ -265,8 +288,6 @@ def main():
             #     log.write(f"[EVAL] Recall: {recall}\n")
             #     log.write(f"[EVAL] F1 Score: {f1}\n")
             #     log.write(f"[EVAL] Pearson Correlation Coefficient: {r}\n")
-
-            
 
     # Load the best model for final evaluation
     model.load_state_dict(torch.load(best_model_path))

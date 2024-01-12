@@ -3,6 +3,7 @@ import math
 import torch
 import torch.nn as nn
 
+
 # Code adapted from the fairseq repo.
 
 def make_positions(tensor, padding_idx, left_pad):
@@ -38,7 +39,7 @@ class SinusoidalPositionalEmbedding(nn.Module):
         self.embedding_dim = embedding_dim
         self.padding_idx = padding_idx
         self.left_pad = left_pad
-        self.weights = dict()   # device --> actual weight; due to nn.DataParallel :-(
+        self.weights = dict()  # device --> actual weight; due to nn.DataParallel :-(
         self.register_buffer('_float_tensor', torch.FloatTensor(1))
 
     @staticmethod
@@ -73,7 +74,9 @@ class SinusoidalPositionalEmbedding(nn.Module):
             )
         self.weights[device] = self.weights[device].type_as(self._float_tensor)
         positions = make_positions(input, self.padding_idx, self.left_pad)
-        return self.weights[device].index_select(0, positions.view(-1)).view(bsz, seq_len, -1).detach()
+        # return self.weights[device].index_select(0, positions.view(-1)).view(bsz, seq_len, -1).detach()
+        # RuntimeError: view size is not compatible with input tensor's size and stride (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
+        return self.weights[device].index_select(0, positions.reshape(-1)).view(bsz, seq_len, -1).detach()
 
     def max_positions(self):
         """Maximum number of supported positions."""

@@ -101,7 +101,8 @@ class BigfiveDataset(Dataset):
         txt_encoding = self.tokenizer.encode_plus(
             asr_txt,
             add_special_tokens=True,
-            max_length=self.max_txt_length,
+            # max_length=self.max_txt_length, # Bert支持最长的文本长度为512，数据集中的文本长度最大为4648
+            max_length=512,
             return_token_type_ids=False,
             padding='max_length',
             truncation=True,
@@ -140,7 +141,7 @@ class BigfiveDataset(Dataset):
         video_path = os.path.join(self.video_folder, filename + '.mp4')
         cap = cv2.VideoCapture(video_path)
 
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        # total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = int(cap.get(cv2.CAP_PROP_FPS))
         frames = []
 
@@ -219,9 +220,9 @@ class BigfiveDataset(Dataset):
 
 
 if __name__ == '__main__':
-    label_path = "/Users/tangbin/Documents/q_id_label20230804.xlsx"
-    asr_folder = "/Users/tangbin/Documents/txts-asr-v2"
-    video_folder = "/Volumes/Toms Shield/datasets/VRLab/BigFive/videos"
+    label_path = "../datasets/bigfive/q_id_label20230804.xlsx"
+    asr_folder = "../datasets/bigfive/asr_data"
+    video_folder = "../datasets/bigfive/videos"
     # Tokenization
     tokenizer = BertTokenizer.from_pretrained("hfl/chinese-roberta-wwm-ext")
     label_df, all_asr_data, max_duration, max_txt_length = process_data_bigfive(label_path, asr_folder, tokenizer)
@@ -236,4 +237,5 @@ if __name__ == '__main__':
         print(f'audio_tensor.shape: ', audio_tensor.shape)  # audio_tensor.shape:  torch.Size([batch_size, 17936000])
         print(f'input_id.shape: ', txt_encoding['input_ids'].shape)  # input_id.shape:  torch.Size([batch_size, 4648])
         print(f'attention_mask.shape: ', txt_encoding['attention_mask'].shape)  # attention_mask.shape:  torch.Size([batch_size, 4648])
+        print(f'input_id: ', txt_encoding['input_ids'])  # input_id:  tensor([[ 101,  720,  720,  ...,    0,    0,    0],
         # break
