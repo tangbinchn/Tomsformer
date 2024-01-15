@@ -1,0 +1,4 @@
+train_results_path: 'train_results/'
+datasets_path: './datasets/bigfive/preprocessed_data/text/liwc51*42_feats_and_responses.json'
+save_model_path: 'models/saved/'
+preprocessed_data_path: 'datasets/bigfive/preprocessed_data/'

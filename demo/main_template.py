@@ -11,15 +11,10 @@ from train_predict.predict_module import load_model, predict
 from train_predict.train_module import train_model
 import torch
 from utils.check_data import check_model_device, check_data_device
-from utils.utils import get_current_time, get_save_path
 
 
 def main(args, config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    save_model_path = get_save_path(args, config)
-
-    print('save_model_path: ', save_model_path)
     print(f'device: {device}')
     # exit()
 
@@ -33,12 +28,12 @@ def main(args, config):
     check_model_device(model, device)
 
     trained_model = train_model(model, dataloader_train, args, device=device)
-    torch.save(trained_model.state_dict(), save_model_path)
+    torch.save(trained_model.state_dict(), 'model.pth')
 
     # 预测部分
     dataloader_test = get_dataloader(config['datasets_path'], args.batch_size, shuffle=False)
     model = Net().to(device)
-    model = load_model(model, save_model_path, args.gpu_nums)
+    model = load_model(model, 'model.pth', args.gpu_nums)
     predictions = predict(model, dataloader_test, device=device)
     print(predictions)  # 或者对预测结果进行其他处理
 
@@ -46,7 +41,7 @@ def main(args, config):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='args')
     parser.add_argument('--batch_size', type=int, default=512, help='batch_size')
-    parser.add_argument('--epochs', type=int, default=2, help='epochs')
+    parser.add_argument('--epochs', type=int, default=10, help='epochs')
     parser.add_argument('--gpu_nums', type=int, default=2, help='gpu_nums')
     args = parser.parse_args()
     # 读取配置文件
